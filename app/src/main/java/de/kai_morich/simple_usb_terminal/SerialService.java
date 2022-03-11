@@ -56,6 +56,8 @@ public class SerialService extends Service implements SerialListener {
         binder = new SerialBinder();
         queue1 = new LinkedList<>();
         queue2 = new LinkedList<>();
+
+
     }
 
     @Override
