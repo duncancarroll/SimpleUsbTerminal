@@ -5,20 +5,22 @@ import android.app.NotificationManager
 import android.app.NotificationManager.IMPORTANCE_HIGH
 import android.app.PendingIntent
 import android.app.PendingIntent.FLAG_IMMUTABLE
-import android.app.PendingIntent.FLAG_UPDATE_CURRENT
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.os.Binder
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.preference.PreferenceManager
+import android.preference.PreferenceManager.getDefaultSharedPreferencesName
 import androidx.core.app.NotificationCompat
+import de.kai_morich.simple_usb_terminal.Constants.CURRENT_DATAFILE_TIMESTAMP
 import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.channels.AsynchronousFileChannel
 import java.nio.file.Paths
-import java.nio.file.StandardOpenOption
 import java.nio.file.StandardOpenOption.CREATE_NEW
 import java.nio.file.StandardOpenOption.WRITE
 import java.nio.file.attribute.FileAttribute
@@ -45,7 +47,6 @@ class SerialService : Service(), SerialListener {
     }
 
 
-    private val NO_ATTRIBUTES: Array<FileAttribute<*>> = arrayOf()
     private class QueueItem constructor(var type: QueueType, var data: ByteArray?, var e: Exception?)
     private val mainLooper = Handler(Looper.getMainLooper())
     private val binder = SerialBinder()
@@ -56,7 +57,7 @@ class SerialService : Service(), SerialListener {
     private var connected = false
     private lateinit var file: File
     private lateinit var asyncFileChannel: AsynchronousFileChannel
-    private object WTF: FileAttribute<Set<PosixFilePermission>> {
+    private object FILE_ATTRIBUTES: FileAttribute<Set<PosixFilePermission>> {
         override fun name(): String {
             return "posix:permissions"
         }
@@ -69,12 +70,14 @@ class SerialService : Service(), SerialListener {
 
     override fun onCreate() {
         super.onCreate()
-        file = File(applicationContext.getExternalFilesDirs(null)[0], "oss_${System.currentTimeMillis()}.csv")
+        val filename = "oss_${System.currentTimeMillis()}.csv"
+        PreferenceManager.getDefaultSharedPreferences(this).edit().putString(CURRENT_DATAFILE_TIMESTAMP, filename).apply()
+        file = File(applicationContext.getExternalFilesDirs(null)[0], filename)
         // Single-threaded async file write
         asyncFileChannel = AsynchronousFileChannel.open(
             Paths.get(file.path), setOf(WRITE, CREATE_NEW),
             Executors.newSingleThreadExecutor(),
-            WTF)
+            FILE_ATTRIBUTES)
 
         asyncFileChannel.write(ByteBuffer.wrap("data\n".encodeToByteArray()), asyncFileChannel.size())
     }

@@ -1,0 +1,6 @@
+<resources>
+    <declare-styleable name="ChartView">
+        <attr name="exampleDimension" format="dimension" />
+        <attr name="exampleColor" format="color" />
+    </declare-styleable>
+</resources>

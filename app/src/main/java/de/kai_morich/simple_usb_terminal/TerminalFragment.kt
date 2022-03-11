@@ -29,18 +29,23 @@ import androidx.fragment.app.Fragment
 import java.io.IOException
 import java.lang.Exception
 import java.lang.StringBuilder
+import java.util.concurrent.TimeUnit
 
 class TerminalFragment : Fragment(), ServiceConnection, SerialListener {
     private enum class Connected {
         FALSE, PENDING, TRUE
     }
 
+    private val REFRESH_INTERVAL_MS = TimeUnit.SECONDS.toMillis(1)
+    private val MAX_LINES = 10000
+    private var handler: Handler = Handler(Looper.getMainLooper())
     private var service: SerialService? = null
     private val broadcastReceiver: BroadcastReceiver
     private var deviceId = 0
     private var portNum = 0
     private var baudRate = 0
     private var usbSerialPort: UsbSerialPort? = null
+    private var chartView: ChartView? = null
     private var receiveText: TextView? = null
     private var sendText: TextView? = null
     private var controlLines: ControlLines? = null
@@ -62,6 +67,88 @@ class TerminalFragment : Fragment(), ServiceConnection, SerialListener {
         baudRate = arguments?.getInt("baud") ?: 0
     }
 
+
+    /*
+     * UI
+     */
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
+        val view = inflater.inflate(R.layout.fragment_terminal, container, false)
+        receiveText = view.findViewById(R.id.receive_text) // TextView performance decreases with number of spans
+        receiveText?.setTextColor(resources.getColor(R.color.colorRecieveText)) // set as default color to reduce number of spans
+        receiveText?.movementMethod = ScrollingMovementMethod.getInstance()
+        chartView = view.findViewById(R.id.chart)
+        sendText = view.findViewById(R.id.send_text)
+        hexWatcher = HexWatcher(sendText)
+        hexWatcher?.enable(hexEnabled)
+        sendText?.addTextChangedListener(hexWatcher)
+        sendText?.hint = if (hexEnabled) "HEX mode" else ""
+        val sendBtn = view.findViewById<View>(R.id.send_btn)
+        sendBtn.setOnClickListener { v: View? -> send("${sendText?.text}") }
+        controlLines = ControlLines(view)
+        return view
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
+        inflater.inflate(R.menu.menu_terminal, menu)
+        menu.findItem(R.id.hex).isChecked = hexEnabled
+        menu.findItem(R.id.controlLines).isChecked = controlLinesEnabled
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.clear -> {
+                receiveText?.text = ""
+                true
+            }
+            R.id.newline -> {
+                val newlineNames = resources.getStringArray(R.array.newline_names)
+                val newlineValues = resources.getStringArray(R.array.newline_values)
+                val pos = listOf(*newlineValues).indexOf(newline)
+                val builder = AlertDialog.Builder(activity)
+                builder.setTitle("Newline")
+                builder.setSingleChoiceItems(newlineNames, pos) { dialog: DialogInterface, item1: Int ->
+                    newline = newlineValues[item1]
+                    dialog.dismiss()
+                }
+                builder.create().show()
+                true
+            }
+            R.id.hex -> {
+                hexEnabled = !hexEnabled
+                sendText?.text = ""
+                hexWatcher?.enable(hexEnabled)
+                sendText?.hint = if (hexEnabled) "HEX mode" else ""
+                item.isChecked = hexEnabled
+                true
+            }
+            R.id.controlLines -> {
+                controlLinesEnabled = !controlLinesEnabled
+                item.isChecked = controlLinesEnabled
+                if (controlLinesEnabled) {
+                    controlLines?.start()
+                } else {
+                    controlLines?.stop()
+                }
+                true
+            }
+            R.id.sendBreak -> {
+                try {
+                    usbSerialPort?.setBreak(true)
+                    Thread.sleep(100)
+                    status("send BREAK")
+                    usbSerialPort?.setBreak(false)
+                } catch (e: Exception) {
+                    status("send BREAK failed: " + e.message)
+                }
+                true
+            }
+            else -> {
+                super.onOptionsItemSelected(item)
+            }
+        }
+    }
+
+
     override fun onDestroy() {
         if (connected != Connected.FALSE) disconnect()
         activity?.stopService(Intent(activity, SerialService::class.java))
@@ -77,6 +164,7 @@ class TerminalFragment : Fragment(), ServiceConnection, SerialListener {
     override fun onStop() {
         if (service != null && activity?.isChangingConfigurations == false) service?.detach()
         super.onStop()
+        stopRefreshHandler()
     }
 
     override fun onAttach(activity: Activity) {
@@ -106,6 +194,7 @@ class TerminalFragment : Fragment(), ServiceConnection, SerialListener {
         activity?.unregisterReceiver(broadcastReceiver)
         if (controlLines != null) controlLines?.stop()
         super.onPause()
+        stopRefreshHandler()
     }
 
     override fun onServiceConnected(name: ComponentName, binder: IBinder) {
@@ -119,79 +208,6 @@ class TerminalFragment : Fragment(), ServiceConnection, SerialListener {
 
     override fun onServiceDisconnected(name: ComponentName) {
         service = null
-    }
-
-    /*
-     * UI
-     */
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
-        val view = inflater.inflate(R.layout.fragment_terminal, container, false)
-        receiveText = view.findViewById(R.id.receive_text) // TextView performance decreases with number of spans
-        receiveText?.setTextColor(resources.getColor(R.color.colorRecieveText)) // set as default color to reduce number of spans
-        receiveText?.movementMethod = ScrollingMovementMethod.getInstance()
-        sendText = view.findViewById(R.id.send_text)
-        hexWatcher = HexWatcher(sendText)
-        hexWatcher?.enable(hexEnabled)
-        sendText?.addTextChangedListener(hexWatcher)
-        sendText?.hint = if (hexEnabled) "HEX mode" else ""
-        val sendBtn = view.findViewById<View>(R.id.send_btn)
-        sendBtn.setOnClickListener { v: View? -> send("${sendText?.text}") }
-        controlLines = ControlLines(view)
-        return view
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu, inflater: MenuInflater) {
-        inflater.inflate(R.menu.menu_terminal, menu)
-        menu.findItem(R.id.hex).isChecked = hexEnabled
-        menu.findItem(R.id.controlLines).isChecked = controlLinesEnabled
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        val id = item.itemId
-        return if (id == R.id.clear) {
-            receiveText?.text = ""
-            true
-        } else if (id == R.id.newline) {
-            val newlineNames = resources.getStringArray(R.array.newline_names)
-            val newlineValues = resources.getStringArray(R.array.newline_values)
-            val pos = listOf(*newlineValues).indexOf(newline)
-            val builder = AlertDialog.Builder(activity)
-            builder.setTitle("Newline")
-            builder.setSingleChoiceItems(newlineNames, pos) { dialog: DialogInterface, item1: Int ->
-                newline = newlineValues[item1]
-                dialog.dismiss()
-            }
-            builder.create().show()
-            true
-        } else if (id == R.id.hex) {
-            hexEnabled = !hexEnabled
-            sendText?.text = ""
-            hexWatcher?.enable(hexEnabled)
-            sendText?.hint = if (hexEnabled) "HEX mode" else ""
-            item.isChecked = hexEnabled
-            true
-        } else if (id == R.id.controlLines) {
-            controlLinesEnabled = !controlLinesEnabled
-            item.isChecked = controlLinesEnabled
-            if (controlLinesEnabled) {
-                controlLines?.start()
-            } else {
-                controlLines?.stop()
-            }
-            true
-        } else if (id == R.id.sendBreak) {
-            try {
-                usbSerialPort?.setBreak(true)
-                Thread.sleep(100)
-                status("send BREAK")
-                usbSerialPort?.setBreak(false)
-            } catch (e: Exception) {
-                status("send BREAK failed: " + e.message)
-            }
-            true
-        } else {
-            super.onOptionsItemSelected(item)
-        }
     }
 
     /*
@@ -247,6 +263,7 @@ class TerminalFragment : Fragment(), ServiceConnection, SerialListener {
         controlLines?.stop()
         service?.disconnect()
         usbSerialPort = null
+        stopRefreshHandler()
     }
 
     private fun send(str: String) {
@@ -304,6 +321,11 @@ class TerminalFragment : Fragment(), ServiceConnection, SerialListener {
                 pendingNewline = msg[msg.length - 1] == '\r'
             }
             receiveText?.append(TextUtil.toCaretString(msg, newline.length != 0))
+
+            // Clear text beyond buffer size
+            if (receiveText?.lineCount ?: 0 > MAX_LINES) {
+                receiveText?.text = ""
+            }
         }
     }
 
@@ -325,6 +347,9 @@ class TerminalFragment : Fragment(), ServiceConnection, SerialListener {
         status("connected")
         connected = Connected.TRUE
         if (controlLinesEnabled) controlLines?.start()
+        context?.let {
+            startRefreshHandler()
+        }
     }
 
     override fun onSerialConnectError(e: Exception) {
@@ -340,6 +365,21 @@ class TerminalFragment : Fragment(), ServiceConnection, SerialListener {
         status("connection lost: " + e.message)
         disconnect()
     }
+
+    private fun startRefreshHandler() {
+        stopRefreshHandler()
+        handler.postDelayed({
+            context?.let {
+                chartView?.reloadData(it)
+                startRefreshHandler()
+            }
+        }, REFRESH_INTERVAL_MS)
+    }
+
+    private fun stopRefreshHandler() {
+        handler.removeCallbacksAndMessages(null)
+    }
+
 
     inner class ControlLines(view: View) {
 
