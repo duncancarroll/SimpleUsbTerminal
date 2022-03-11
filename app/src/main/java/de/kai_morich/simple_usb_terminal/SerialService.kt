@@ -204,11 +204,11 @@ class SerialService : Service(), SerialListener {
                         if (listener != null) {
                             listener?.onSerialRead(data)
                         } else {
-                            queue1.add(QueueItem(QueueType.READ, data, null))
+                            //queue1.add(QueueItem(QueueType.READ, data, null))
                         }
                     }
                 } else {
-                    queue2.add(QueueItem(QueueType.READ, data, null))
+                    //queue2.add(QueueItem(QueueType.READ, data, null))
                 }
 
                 // Always write to disk:
