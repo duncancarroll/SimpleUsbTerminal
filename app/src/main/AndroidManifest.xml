@@ -4,7 +4,6 @@
     package="de.kai_morich.simple_usb_terminal">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-
     <!-- mipmap/ic_launcher created with Android Studio -> New -> Image Asset using @color/colorPrimaryDark as background color -->
     <application
         android:icon="@mipmap/ic_launcher"
