@@ -36,7 +36,7 @@ class TerminalFragment : Fragment(), ServiceConnection, SerialListener {
         FALSE, PENDING, TRUE
     }
 
-    private val REFRESH_INTERVAL_MS = TimeUnit.SECONDS.toMillis(1)
+    private val REFRESH_INTERVAL_MS = TimeUnit.MILLISECONDS.toMillis(500)
     private val MAX_LINES = 10000
     private var handler: Handler = Handler(Looper.getMainLooper())
     private var service: SerialService? = null
@@ -188,6 +188,9 @@ class TerminalFragment : Fragment(), ServiceConnection, SerialListener {
             activity?.runOnUiThread { connect() }
         }
         if (controlLinesEnabled && controlLines != null && connected == Connected.TRUE) controlLines?.start()
+        if (connected == Connected.TRUE) {
+            startRefreshHandler()
+        }
     }
 
     override fun onPause() {

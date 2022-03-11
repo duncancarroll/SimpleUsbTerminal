@@ -6,8 +6,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.preference.PreferenceManager
 import android.util.AttributeSet
-import android.util.Log
 import android.view.View
+import org.apache.commons.io.input.ReversedLinesFileReader
 import java.io.File
 import java.lang.Exception
 import java.nio.file.Files
@@ -21,6 +21,7 @@ class ChartView : View {
     private lateinit var paint: Paint
     private var file: File? = null
     private var filename: String? = null
+    private var reverseReader: ReversedLinesFileReader? = null
 
     /**
      * The font color
@@ -75,7 +76,9 @@ class ChartView : View {
         filename = PreferenceManager.getDefaultSharedPreferences(context).getString(Constants.CURRENT_DATAFILE_TIMESTAMP, null)
         filename?.let {
             file = File(context.getExternalFilesDirs(null)[0], it)
+            reverseReader = ReversedLinesFileReader(file, Charsets.UTF_8)
         }
+
         postInvalidate()
     }
 
@@ -87,7 +90,6 @@ class ChartView : View {
             style = Paint.Style.FILL_AND_STROKE
             strokeWidth = 2f
         }
-
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -103,24 +105,17 @@ class ChartView : View {
         val contentWidth = width - paddingLeft - paddingRight
         val contentHeight = height - paddingTop - paddingBottom
 
-        var maxVal = 1024f
-        var i = contentWidth
+        val maxVal = 1024f  // Maximum value of data sent
 
-        // Read lines backwards and draw 1 px for each data point
-        file?.let {
-            Files.lines(Paths.get(it.path)).collect(Collectors.toCollection(::LinkedList)).descendingIterator().forEachRemaining { value ->
-                try {
-                    if (i >= 0) {
-                        val v = value.trim().toFloat()
-                        val x = i.toFloat()
-                        val y = contentHeight - ((v / 1024) * contentHeight)
-                        canvas.drawPoint(x, y, paint)
-                        Log.d("ChartView", "Draw $v at $x, $y")
-                    }
-                } catch(e: Exception) {
-                    Log.e("ChartView", "Bad line: $value" )
-                }
-                i--
+        // Read the last n lines in reverse order
+        reverseReader?.readLines(contentWidth)?.forEachIndexed { i, value ->
+            try {
+                val v = value.trim().toFloat()
+                val x = contentWidth.toFloat() - i  // plot in reverse since we're reading in reverse
+                val y = contentHeight - ((v / maxVal) * contentHeight)
+                canvas.drawPoint(x, y, paint)
+            } catch(e: Exception) {
+                //Log.e("ChartView", "Bad line: $value" )
             }
         }
     }
