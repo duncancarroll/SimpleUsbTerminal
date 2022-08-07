@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">One Small Step</string>
+    <string name="app_name">Serial Plotter</string>
     <string name="devices">USB Devices</string>
 </resources>

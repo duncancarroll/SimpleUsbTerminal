@@ -83,7 +83,6 @@ class SerialService : Service(), SerialListener {
     }
 
 
-
     override fun onDestroy() {
         cancelNotification()
         disconnect()
